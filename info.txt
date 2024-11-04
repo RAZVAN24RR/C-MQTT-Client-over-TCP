@@ -1,0 +1,15 @@
+
+COMPILAREA PROGRAMULUI
+-gcc -Wall -o mqtt_client main.c mqtt_client.c 
+
+RULAREA PROGRAMULUI
+-./mqtt_client
+
+PORNIREA SERVERULUI MOSQUITTO
+-mosquitto -v
+
+VERIFICAREA DACA MOSQUITTO RULEAZA PE 1883
+-sudo ss -tulnp | grep :1883
+
+OPRIREA SERVERULUI MOSQUITTO
+-sudo systemctl stop mosquitto
