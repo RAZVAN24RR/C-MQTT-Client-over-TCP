@@ -16,10 +16,11 @@
 #define MQTT_KEEPALIVE 60
 #define BUFFER_SIZE 1024
 
-int mqtt_connect(int socktfd, const char *client_id);
+int encode_remaining_length(unsigned char *packet, int remaining_length);
+int mqtt_connect(int socktfd, const char *client_id, const char *username, const char *password);
 int mqtt_publish(int socktfd, const char *topic, const char *message);
 int mqtt_subscribe(int socktfd, const char *topic);
 int mqtt_ping(int socktfd);
 void mqtt_disconnect(int socktfd);
 
-#endif // ! MQTT_CLIENT_H
+#endif // MQTT_CLIENT_H

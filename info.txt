@@ -8,8 +8,22 @@ RULAREA PROGRAMULUI
 PORNIREA SERVERULUI MOSQUITTO
 -mosquitto -v
 
+PORNIREA PENTRU TOATE NETWORK INTERFACES
+
 VERIFICAREA DACA MOSQUITTO RULEAZA PE 1883
 -sudo ss -tulnp | grep :1883
 
+sudo ss -tulnp | grep mosquitto
+
+
 OPRIREA SERVERULUI MOSQUITTO
 -sudo systemctl stop mosquitto
+
+VERIFICARE CONEXIUNE ALT TERMINAL PE PASSWORD
+mosquitto_pub -h 127.0.0.1 -t "test/topic" -m "Hello, MQTT!" -u "your_username" -P "your_password"
+
+mosquitto_pub -h 192.168.1.138 -t "test/topic" -m "Hello, MQTT!" -u "razvan" -P "razvan"
+
+MONITOR ALL TOPICS
+
+mosquitto_sub -h 192.168.1.138 -t "#" -u "razvan" -P "razvan"
