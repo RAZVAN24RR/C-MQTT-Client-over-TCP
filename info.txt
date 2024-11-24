@@ -1,6 +1,6 @@
 
 COMPILAREA PROGRAMULUI
--gcc -Wall -o mqtt_client main.c mqtt_client.c 
+-gcc -Wall -o mqtt_app main.c mqtt_client.c -lpthread
 
 RULAREA PROGRAMULUI
 -./mqtt_client

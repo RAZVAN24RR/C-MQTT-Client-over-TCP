@@ -1,5 +1,7 @@
 #include "mqtt_client.h"
 
+volatile time_t last_pingresp_time = 0;
+
 int encode_remaining_length(unsigned char *packet, int remaining_length)
 {
     int index = 0;
@@ -173,32 +175,66 @@ int mqtt_subscribe(int socktfd, const char *topic)
     printf("Subscribed to topic '%s'\n", topic);
     return 0;
 }
-
 int mqtt_ping(int socktfd)
 {
-    unsigned char packet[2] = {0xC0, 0x00};
+    unsigned char packet[2] = {0xC0, 0x00}; // PINGREQ
 
-    if (send(socktfd, packet, 2, 0) < 0)
+    if (send(socktfd, packet, sizeof(packet), 0) < 0)
     {
         perror("ERROR: Sending PINGREQ packet!");
         return -1;
     }
 
-    unsigned char response[2];
-    if (recv(socktfd, response, 2, 0) < 0)
-    {
-        perror("ERROR: Receiving PINGRESP!");
-        return -1;
-    }
-
-    if (response[0] != 0xD0 || response[1] != 0x00)
-    {
-        fprintf(stderr, "ERROR: Invalid PINGRESP packet!\n");
-        return -1;
-    }
-
-    printf("PINGRESP received from broker\n");
+    printf("PINGREQ sent to broker\n");
+    // se actualizeaza timpul ultimei trimiteri
+    last_pingresp_time = time(NULL);
     return 0;
+}
+
+void process_publish(unsigned char *buffer, int length)
+{
+    int index = 1;
+    int multiplier = 1;
+    int remaining_length = 0;
+
+    unsigned char encoded_byte;
+    do
+    {
+        encoded_byte = buffer[index++];
+        remaining_length += (encoded_byte & 127) * multiplier;
+        multiplier *= 128;
+    } while ((encoded_byte & 128) != 0);
+
+    // citește lungimea topic-ului
+    int msb = buffer[index++] << 8;
+    int lsb = buffer[index++];
+    int topic_len = msb | lsb;
+
+    char topic[topic_len + 1];
+    memcpy(topic, &buffer[index], topic_len);
+    topic[topic_len] = '\0';
+    index += topic_len;
+
+    // citește payload-ul
+    int payload_len = remaining_length - (index - 2);
+    char payload[payload_len + 1];
+    memcpy(payload, &buffer[index], payload_len);
+    payload[payload_len] = '\0';
+
+    printf("Message received on topic '%s': %s\n", topic, payload);
+}
+
+void process_puback(unsigned char *buffer, int length)
+{
+    if (length < 4) // PUBACK are o lungime minimă de 4 octeți
+    {
+        fprintf(stderr, "ERROR: Invalid PUBACK packet length: %d\n", length);
+        return;
+    }
+
+    // Extrage Packet Identifier (2 octeți)
+    unsigned short packet_id = (buffer[2] << 8) | buffer[3];
+    printf("PUBACK received for Packet ID: %d\n", packet_id);
 }
 
 void mqtt_disconnect(int socktfd)

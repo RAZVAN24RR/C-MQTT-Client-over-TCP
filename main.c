@@ -11,50 +11,76 @@ const char *password = "razvan";
 const char *topic = "test/topic";
 int socktfd;
 
-// Function to handle incoming messages
+void *send_ping(void *arg)
+{
+    while (1)
+    {
+        time_t current_time = time(NULL);
+
+        // verific dacă a trecut prea mult timp fără un PINGRESP
+        if (last_pingresp_time != 0 && difftime(current_time, last_pingresp_time) > MQTT_KEEPALIVE)
+        {
+            fprintf(stderr, "ERROR: No PINGRESP received in %d seconds. Disconnecting...\n", MQTT_KEEPALIVE);
+            break; // Ieși din buclă dacă timeout-ul este depășit
+        }
+
+        if (mqtt_ping(socktfd) < 0)
+        {
+            fprintf(stderr, "ERROR: Sending PINGREQ failed! Disconnecting...\n");
+            break;
+        }
+
+        sleep(5); // Așteaptă 3 secunde înainte de următorul PINGREQ
+    }
+
+    return NULL;
+}
+
 void *listen_for_messages(void *arg)
 {
     while (1)
     {
         unsigned char buffer[BUFFER_SIZE];
         int bytes_received = recv(socktfd, buffer, BUFFER_SIZE, 0);
-        if (bytes_received > 0)
+
+        if (bytes_received < 0)
         {
-            int index = 0;
-            unsigned char packet_type = buffer[0] & 0xF0;
+            perror("ERROR: Receiving MQTT packet!");
+            break;
+        }
+        else if (bytes_received == 0)
+        {
+            fprintf(stderr, "ERROR: Broker closed the connection!\n");
+            break;
+        }
 
-            // Process PUBLISH packets
-            if (packet_type == 0x30)
-            {
-                index++;
-                int multiplier = 1;
-                int remaining_length = 0;
-                unsigned char encoded_byte;
+        unsigned char packet_type = buffer[0] & 0xF0;
 
-                do
-                {
-                    encoded_byte = buffer[index++];
-                    remaining_length += (encoded_byte & 127) * multiplier;
-                    multiplier *= 128;
-                } while ((encoded_byte & 128) != 0);
+        switch (packet_type)
+        {
+        case 0x30: // PUBLISH
+            process_publish(buffer, bytes_received);
+            break;
 
-                // Read the topic name
-                int topic_len = (buffer[index++] << 8) | buffer[index++];
-                char topic_received[topic_len + 1];
-                memcpy(topic_received, &buffer[index], topic_len);
-                topic_received[topic_len] = '\0';
-                index += topic_len;
+        case 0x40: // PUBACK
+            process_puback(buffer, bytes_received);
+            break;
 
-                // Read the message payload
-                int payload_len = remaining_length - (index - 2);
-                char message_received[payload_len + 1];
-                memcpy(message_received, &buffer[index], payload_len);
-                message_received[payload_len] = '\0';
+        case 0xD0: // PINGRESP
+            printf("PINGRESP received from broker\n");
+            last_pingresp_time = time(NULL); // Actualizează timpul ultimei recepții
+            break;
 
-                printf("Message received on topic '%s': %s\n", topic_received, message_received);
-            }
+        case 0x90: // SUBACK
+            printf("SUBACK received\n");
+            break;
+
+        default:
+            fprintf(stderr, "INFO: Unhandled packet type: 0x%X\n", packet_type);
+            break;
         }
     }
+
     return NULL;
 }
 
@@ -103,22 +129,31 @@ int main(int argc, char *argv[])
 
     printf("Listening for messages on topic '%s'. Type 'trimite Hello' to send 'Hello' to the topic.\n", topic);
 
-    pthread_t listen_thread;
-    pthread_create(&listen_thread, NULL, listen_for_messages, NULL);
+    pthread_t ping_thread, listen_thread;
 
-    // Command loop to send messages
+    if (pthread_create(&listen_thread, NULL, listen_for_messages, NULL) != 0)
+    {
+        perror("ERROR: Failed to create listen thread!");
+        exit(EXIT_FAILURE);
+    }
+
+    if (pthread_create(&ping_thread, NULL, send_ping, NULL) != 0)
+    {
+        perror("ERROR: Failed to create ping thread!");
+        pthread_cancel(listen_thread);
+        exit(EXIT_FAILURE);
+    }
+
+    // send messages
     char input[BUFFER_SIZE];
     while (true)
     {
         fgets(input, BUFFER_SIZE, stdin);
         if (strncmp(input, "trimite ", 8) == 0)
         {
-            // Copy the message to a local array for safe modification
             char message[BUFFER_SIZE];
-            strncpy(message, input + 8, BUFFER_SIZE - 1); // Skip "trimite " and copy the rest
-            message[BUFFER_SIZE - 1] = '\0';              // Ensure null termination
-
-            // Remove newline character
+            strncpy(message, input + 8, BUFFER_SIZE - 1);
+            message[BUFFER_SIZE - 1] = '\0';
             message[strcspn(message, "\n")] = '\0';
 
             if (mqtt_publish(socktfd, topic, message) < 0)
@@ -129,8 +164,8 @@ int main(int argc, char *argv[])
             printf("Message '%s' sent to topic '%s'\n", message, topic);
         }
     }
-
     pthread_cancel(listen_thread);
+    pthread_cancel(ping_thread);
     mqtt_disconnect(socktfd);
     close(socktfd);
 
